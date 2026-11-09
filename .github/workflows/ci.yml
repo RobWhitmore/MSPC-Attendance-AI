@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 to BUILD and TEST. The deployed Function still runs node:20
+      # (platform.apiRuntime in staticwebapp.config.json) - this is the build
+      # toolchain, not the runtime. The route tests substitute the data layer
+      # with node:test's mock.module, which needs 22.3 or newer.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # npm ci needs the lockfile. App Hosting used to fail every build without
+      # it; the same is true here.
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      # The config file is read from inside the uploaded artifact, not from the
+      # repository root. Without it the deploy fails with "Function language
+      # info isn't provided", which names neither this file nor apiRuntime.
+      - name: Assert staticwebapp.config.json is inside the build
+        run: |
+          test -f dist/staticwebapp.config.json \
+            || { echo "dist/staticwebapp.config.json is missing - it must live in public/"; exit 1; }
+          grep -q '"apiRuntime"' dist/staticwebapp.config.json \
+            || { echo "platform.apiRuntime is missing from the config"; exit 1; }
+
+      - name: Install API runtime dependencies
+        # Our own code is bundled by esbuild; only @azure/functions has to be
+        # resolvable at runtime, and Oryx is skipped so nothing else installs it.
+        run: npm ci --omit=dev --prefix api || npm install --omit=dev --prefix api
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: |
+            dist
+            api
+          retention-days: 1
+
+  deploy:
+    name: Deploy
+    needs: build
+    # DEPLOY_ENABLED gates this until the Azure infrastructure exists. Without
+    # it, every push to main fails here on an empty deployment token - and a
+    # pipeline that is always red is one nobody reads.
+    #
+    # A repository *variable* rather than a secret: secrets are not available
+    # to a job-level `if`, variables are. Turn it on at DEPLOY.md step 5:
+    #
+    #     gh variable set DEPLOY_ENABLED --body true
+    #
+    # Setting it to anything but "true" also serves as a deploy freeze.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && github.event_name != 'pull_request'
+      && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    outputs:
+      url: ${{ steps.swa.outputs.static_web_app_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+
+      - name: Deploy to Static Web Apps
+        id: swa
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: upload
+          app_location: dist
+          api_location: api
+          output_location: ''
+          skip_app_build: true
+          # Logged as "Unexpected input(s) 'skip_api_build'". It is passed to the
+          # container as INPUT_SKIP_API_BUILD and honoured - look for
+          # "Skipping step to build /github/workspace/api with Oryx". The warning
+          # is noise.
+          skip_api_build: true
+
+  smoke:
+    name: Smoke tests
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+
+      # A deploy that returns 200 is not a deploy that works. These assert that
+      # the API refuses anonymous callers - the check that fails if participant
+      # data is public.
+      - name: Smoke test the deployment
+        run: npm run smoke -- "${{ vars.APP_URL || needs.deploy.outputs.url }}"

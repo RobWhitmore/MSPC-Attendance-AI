@@ -1,0 +1,6 @@
+{
+  "name": "MSPC Attendance",
+  "description": "Internal organization application to streamline attendance tracking for meetings and events.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

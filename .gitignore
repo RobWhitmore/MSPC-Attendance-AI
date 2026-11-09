@@ -1,0 +1,33 @@
+node_modules/
+build/
+dist/
+api/dist/
+api/node_modules/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Claude Code settings. These accumulate per-machine permission allowlists with
+# absolute paths in them, so they are local state rather than project config.
+.claude/
+
+# Infoodle's own documentation, kept locally while working. INFOODLE-API.md and
+# INFOODLE-CSV.md carry everything this project needs from them; the originals
+# are large binaries with no reason to sit in git history forever.
+infoodle-csv.docx
+infoodle-csv.pdf
+
+# A net for the day somebody copies an export in to run a migration against it.
+# A Firestore or system backup contains live access codes, email addresses,
+# phone numbers and medical conditions.
+*backup*.json
+*export*.json
+firestore-export/
+
+# Word/PDF exports of HANDOVER.md and PROVISION.md, made to send to people.
+# The Markdown is the source; the exports are large binaries.
+handover.docx
+provision.docx
+provision.pdf

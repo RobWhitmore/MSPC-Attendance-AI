@@ -1,0 +1,9 @@
+{
+  "name": "mspc-attendance-api",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "dependencies": {
+    "@azure/functions": "^4.5.1"
+  }
+}
